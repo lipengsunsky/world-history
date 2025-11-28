@@ -33,7 +33,8 @@ import {
   X,
   ZoomIn,
   ZoomOut,
-  Library
+  Library,
+  FileDown
 } from 'lucide-react';
 
 // --- Types ---
@@ -204,6 +205,7 @@ const TRANSLATIONS = {
     interactionTypes: "Interactions",
     refresh: "Regenerate",
     settings: "Settings",
+    export: "Export Webpage",
     themeSystem: "System Default",
     themeLight: "Light Mode",
     themeDark: "Dark Mode",
@@ -241,6 +243,7 @@ const TRANSLATIONS = {
     interactionTypes: "互动类型",
     refresh: "重新生成",
     settings: "设置",
+    export: "发布为网页",
     themeSystem: "跟随系统",
     themeLight: "日间模式",
     themeDark: "夜间模式",
@@ -384,6 +387,151 @@ const App = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
+
+  // Export to HTML
+  const handleExportHtml = () => {
+    if (!data) return;
+    const yearLabel = data.year < 0 ? `${Math.abs(data.year)} BC` : `${data.year} AD`;
+    
+    const htmlContent = `
+<!DOCTYPE html>
+<html lang="${lang}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ChronoMap: ${yearLabel}</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://unpkg.com/topojson-client@3"></script>
+  <style>
+    body { margin: 0; background: ${themeColors.mapBg}; color: ${themeColors.text}; font-family: -apple-system, system-ui, sans-serif; overflow: hidden; }
+    #map { width: 100vw; height: 100vh; cursor: move; }
+    .panel { position: absolute; top: 20px; right: 20px; width: 320px; max-height: 85vh; overflow-y: auto; background: ${activeTheme === 'dark' ? 'rgba(15, 23, 42, 0.9)' : 'rgba(255,255,255,0.9)'}; border: 1px solid ${themeColors.panelBorder}; padding: 20px; border-radius: 12px; backdrop-filter: blur(12px); box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2); transition: transform 0.3s; }
+    .hidden { transform: translateX(120%); }
+    h1 { margin: 0 0 5px 0; font-size: 20px; font-weight: 700; }
+    .subtitle { font-size: 12px; opacity: 0.7; margin-bottom: 20px; }
+    .civ-item { padding: 10px; border: 1px solid ${themeColors.panelBorder}; border-radius: 6px; margin-bottom: 8px; cursor: pointer; transition: all 0.2s; }
+    .civ-item:hover { border-color: #6366f1; background: ${activeTheme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.02)'}; }
+    .civ-name { font-weight: bold; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+    .color-dot { width: 10px; height: 10px; border-radius: 50%; }
+    .close-btn { position: absolute; top: 15px; right: 15px; cursor: pointer; opacity: 0.5; }
+    .close-btn:hover { opacity: 1; }
+    .controls { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); background: ${themeColors.panelBg}; padding: 10px 20px; border-radius: 20px; border: 1px solid ${themeColors.panelBorder}; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); font-family: monospace; font-weight: bold; font-size: 18px; pointer-events: none; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-thumb { background: ${themeColors.stroke}; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div class="controls">${yearLabel}</div>
+  <div id="panel" class="panel hidden">
+    <div class="close-btn" onclick="togglePanel(false)">✕</div>
+    <div id="panel-content"></div>
+  </div>
+
+  <script>
+    const data = ${JSON.stringify(data)};
+    const geoUrl = 'https://unpkg.com/world-atlas@2.0.2/countries-110m.json';
+    const theme = { land: '${themeColors.land}', stroke: '${themeColors.stroke}', text: '${themeColors.text}' };
+    
+    // D3 Setup
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const svg = d3.select("#map").append("svg").attr("width", width).attr("height", height);
+    const g = svg.append("g");
+    
+    const projection = d3.geoMercator().scale(width / 6.5).translate([width / 2, height / 1.6]);
+    const path = d3.geoPath().projection(projection);
+
+    const zoom = d3.zoom().scaleExtent([1, 8]).on("zoom", (e) => {
+      g.attr("transform", e.transform);
+      const k = e.transform.k;
+      g.selectAll("path.country").attr("stroke-width", 0.5 / k);
+      g.selectAll("circle.territory-border").attr("stroke-width", 1 / k);
+      g.selectAll("text.civ-label").attr("font-size", (10 / k) + "px");
+      g.selectAll("path.interaction").attr("stroke-width", 1.5 / k);
+    });
+    svg.call(zoom);
+
+    // Load Map
+    d3.json(geoUrl).then(topology => {
+      const geoData = topojson.feature(topology, topology.objects.countries);
+      
+      // Countries
+      g.append("g").selectAll("path").data(geoData.features).enter().append("path")
+        .attr("d", path).attr("class", "country").attr("fill", theme.land).attr("stroke", theme.stroke).attr("stroke-width", 0.5);
+
+      // Defs
+      const defs = svg.append("defs");
+      data.civilizations.forEach((civ, i) => {
+        const grad = defs.append("radialGradient").attr("id", "grad-" + i);
+        grad.append("stop").attr("offset", "0%").attr("stop-color", civ.color).attr("stop-opacity", 0.4);
+        grad.append("stop").attr("offset", "100%").attr("stop-color", civ.color).attr("stop-opacity", 0);
+        
+        const pos = projection([civ.lng, civ.lat]);
+        if(!pos) return;
+        const r = (civ.radiusKm / 15000) * width * 1.5;
+
+        // Fill
+        g.append("circle").attr("cx", pos[0]).attr("cy", pos[1]).attr("r", Math.max(r, 10))
+          .attr("fill", "url(#grad-" + i + ")").style("cursor", "pointer")
+          .on("click", (e) => showCiv(civ));
+          
+        // Border
+        g.append("circle").attr("class", "territory-border").attr("cx", pos[0]).attr("cy", pos[1]).attr("r", Math.max(r, 10))
+          .attr("fill", "none").attr("stroke", civ.color).attr("stroke-width", 1).attr("stroke-dasharray", "4,4").attr("opacity", 0.6);
+
+        // Label
+        g.append("text").attr("class", "civ-label").attr("x", pos[0]).attr("y", pos[1]).attr("dy", ".35em")
+          .text(civ.name).attr("text-anchor", "middle").attr("fill", theme.text).attr("font-size", "10px").attr("font-weight", "bold")
+          .style("pointer-events", "none").style("text-shadow", "0 0 3px black");
+      });
+
+      // Interactions
+      data.interactions.forEach(int => {
+        const from = projection([int.fromLng, int.fromLat]);
+        const to = projection([int.toLng, int.toLat]);
+        if(from && to) {
+           const dx = to[0] - from[0], dy = to[1] - from[1], dr = Math.sqrt(dx * dx + dy * dy) * 1.5;
+           const color = int.type === 'conflict' ? '#ef4444' : int.type === 'trade' ? '#eab308' : '#3b82f6';
+           g.append("path").attr("class", "interaction").attr("d", \`M\${from[0]},\${from[1]}A\${dr},\${dr} 0 0,1 \${to[0]},\${to[1]}\`)
+            .attr("fill", "none").attr("stroke", color).attr("stroke-width", 1.5).attr("stroke-dasharray", int.type === 'conflict' ? "4,4" : "none").attr("opacity", 0.6);
+        }
+      });
+    });
+
+    function showCiv(civ) {
+      const p = document.getElementById("panel");
+      const c = document.getElementById("panel-content");
+      p.classList.remove("hidden");
+      c.innerHTML = \`
+        <h1>\${civ.name}</h1>
+        <div class="subtitle">\${civ.overview}</div>
+        <div class="civ-item"><strong>Population:</strong> \${civ.society.population}</div>
+        <div class="civ-item"><strong>Govt:</strong> \${civ.government.type}</div>
+        <h3>Sources</h3>
+        <ul>\${(civ.sources || []).map(s => \`<li>\${s}</li>\`).join('')}</ul>
+      \`;
+    }
+    
+    function togglePanel(show) {
+      const p = document.getElementById("panel");
+      if(show) p.classList.remove("hidden");
+      else p.classList.add("hidden");
+    }
+  </script>
+</body>
+</html>`;
+
+    const blob = new Blob([htmlContent], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `history_map_${data.year}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   // Search
   const handleSearch = async (e: React.FormEvent) => {
@@ -590,7 +738,16 @@ const App = () => {
       .scaleExtent([1, 8])
       .translateExtent([[0, 0], [width, height]])
       .on("zoom", (event: any) => {
-        g.attr("transform", event.transform);
+        const { transform } = event;
+        g.attr("transform", transform);
+        
+        // Semantic Zoom logic: Scale strokes and text inversely
+        const k = transform.k;
+        g.selectAll("path.country").attr("stroke-width", 0.5 / k);
+        g.selectAll("circle.territory-border").attr("stroke-width", 1 / k);
+        g.selectAll("path.interaction").attr("stroke-width", 1.5 / k);
+        // Text keeps constant screen size (approx)
+        g.selectAll("text.civ-label").attr("font-size", `${10 / k}px`);
       });
 
     // Save zoom instance
@@ -611,10 +768,11 @@ const App = () => {
       .selectAll("path")
       .data(geoData.features)
       .enter().append("path")
+      .attr("class", "country")
       .attr("d", path)
       .attr("fill", themeColors.land)
       .attr("stroke", themeColors.stroke)
-      .attr("stroke-width", 0.5);
+      .attr("stroke-width", 0.5); // Initial width
 
     if (data) {
       const defs = svg.append("defs");
@@ -646,6 +804,7 @@ const App = () => {
           
         // Solid border for "Territory" feel
         g.append("circle")
+          .attr("class", "territory-border")
           .attr("cx", x).attr("cy", y).attr("r", Math.max(r, 10))
           .attr("fill", "none")
           .attr("stroke", civ.color)
@@ -656,11 +815,12 @@ const App = () => {
 
         // Label
         g.append("text")
+          .attr("class", "civ-label")
           .attr("x", x).attr("y", y).attr("dy", ".35em")
           .text(civ.name)
           .attr("text-anchor", "middle")
           .attr("fill", themeColors.text)
-          .attr("font-size", "8px")
+          .attr("font-size", "10px") // Initial Size
           .attr("font-weight", "bold")
           .style("text-shadow", activeTheme === 'dark' ? "0 0 4px #000" : "0 0 4px #fff")
           .style("pointer-events", "none");
@@ -675,6 +835,7 @@ const App = () => {
         const color = int.type === 'conflict' ? '#ef4444' : int.type === 'trade' ? '#eab308' : '#3b82f6';
         
         g.append("path")
+          .attr("class", "interaction")
           .attr("d", `M${from[0]},${from[1]}A${dr},${dr} 0 0,1 ${to[0]},${to[1]}`)
           .attr("fill", "none").attr("stroke", color).attr("stroke-width", 1.5)
           .attr("stroke-dasharray", int.type === 'conflict' ? "4,4" : "none")
@@ -764,6 +925,7 @@ const App = () => {
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 opacity-50" size={14} />
         </form>
         <div className="flex gap-2">
+          <button onClick={handleExportHtml} className="p-2 rounded hover:bg-slate-500/10" title={t.export}><FileDown size={18}/></button>
           <button onClick={() => setShowSettings(true)} className="p-2 rounded hover:bg-slate-500/10" title={t.settings}><Settings size={18}/></button>
         </div>
       </div>
